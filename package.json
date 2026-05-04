@@ -1,0 +1,18 @@
+{
+    "name": "vendor-lookup-scraper",
+    "version": "1.0.0",
+    "description": "Playwright-based distributor portal scraper for the Vendor & Distributor Lookup Assistant",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node --watch server.js",
+        "install-browsers": "npx playwright install chromium"
+    },
+    "dependencies": {
+        "express": "^4.18.2",
+        "playwright": "^1.44.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}
