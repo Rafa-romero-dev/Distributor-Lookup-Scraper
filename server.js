@@ -37,7 +37,7 @@ app.post("/search/acd", async (req, res) => {
 
         // ── Step 1: Log in ──────────────────────────────────────────────────────
         console.log(`[ACD] Logging in as ${acd_username}...`);
-        await page.goto("https://www.acddist.com/login", { waitUntil: "networkidle" });
+        await page.goto("https://www.acdd.com/login", { waitUntil: "networkidle" });
 
         await page.fill('input[name="email"], input[type="email"], #email', acd_username);
         await page.fill('input[name="password"], input[type="password"], #password', acd_password);
@@ -54,7 +54,7 @@ app.post("/search/acd", async (req, res) => {
         // ── Step 2: Search ──────────────────────────────────────────────────────
         console.log(`[ACD] Searching for: ${product_name}`);
         await page.goto(
-            `https://www.acddist.com/products?q=${encodeURIComponent(product_name)}`,
+            `https://www.acdd.com/search?term=${encodeURIComponent(product_name)}`,
             { waitUntil: "networkidle" }
         );
 
