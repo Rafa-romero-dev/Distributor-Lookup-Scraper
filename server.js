@@ -35,7 +35,7 @@ app.post("/search/acd", async (req, res) => {
         });
         const page = await context.newPage();
 
-        // ── Step 1: Log in ──────────────────────────────────────────────────────
+        // ── Step 1: Log in ────────────────────────────────────────────────────────
         console.log(`[ACD] Logging in as ${acd_username}...`);
         await page.goto("https://www.acdd.com/login", { waitUntil: "networkidle" });
 
@@ -51,27 +51,23 @@ app.post("/search/acd", async (req, res) => {
             return res.status(401).json({ error: "ACD login failed — check credentials" });
         }
 
-        // ── Step 2: Search ──────────────────────────────────────────────────────
+        // ── Step 2: Search ────────────────────────────────────────────────────────
         console.log(`[ACD] Searching for: ${product_name}`);
         await page.goto(
             `https://www.acdd.com/search?term=${encodeURIComponent(product_name)}`,
             { waitUntil: "networkidle" }
         );
 
-        // ── Step 3: Parse results ───────────────────────────────────────────────
-        const result = await page.evaluate((searchTerm) => {
-            // Look for product cards / rows — adjust selectors if ACD updates their markup
-            const items = document.querySelectorAll(
-                ".product-card, .product-item, .search-result-item, [class*='product']"
-            );
+        // ── Step 3: Parse results ─────────────────────────────────────────────────
+        const result = await page.evaluate(() => {
+            const items = document.querySelectorAll("div.group");
 
             if (!items || items.length === 0) {
-                // Check for "no results" message
-                const body = document.body.innerText.toLowerCase();
+                const bodyText = document.body.innerText.toLowerCase();
                 if (
-                    body.includes("no results") ||
-                    body.includes("no products found") ||
-                    body.includes("0 results")
+                    bodyText.includes("no results") ||
+                    bodyText.includes("no products found") ||
+                    bodyText.includes("0 results")
                 ) {
                     return { found: false, status: "Not found", quantity: 0, matches: [] };
                 }
@@ -79,50 +75,132 @@ app.post("/search/acd", async (req, res) => {
             }
 
             const matches = [];
+
             items.forEach((item) => {
-                const nameEl = item.querySelector(
-                    ".product-name, .product-title, h2, h3, [class*='name'], [class*='title']"
-                );
-                const stockEl = item.querySelector(
-                    ".stock, .qty, .quantity, [class*='stock'], [class*='qty'], [class*='avail']"
-                );
-                const skuEl = item.querySelector(".sku, [class*='sku'], [class*='item-no']");
-
+                // ── Name ───────────────────────────────────────────────────────
+                const nameEl = item.querySelector("h3 a");
                 if (!nameEl) return;
-
                 const name = nameEl.innerText.trim();
-                const stockText = stockEl ? stockEl.innerText.trim() : "";
-                const sku = skuEl ? skuEl.innerText.trim() : "";
 
-                // Parse quantity from stock text
-                const qtyMatch = stockText.match(/\d+/);
-                const qty = qtyMatch ? parseInt(qtyMatch[0], 10) : 0;
+                // ── SKU ────────────────────────────────────────────────────────
+                const skuEl = Array.from(item.querySelectorAll("p")).find((p) =>
+                    p.innerText.trim().startsWith("SKU:")
+                );
+                const sku = skuEl ? skuEl.innerText.replace("SKU:", "").trim() : "";
 
-                const inStock =
-                    qty > 0 ||
-                    stockText.toLowerCase().includes("in stock") ||
-                    stockText.toLowerCase().includes("available");
+                // ── Qty Available (shown when logged in) ───────────────────────
+                // e.g. "Qty Available: 0" or "Qty Available: 14"
+                const qtyEl = Array.from(item.querySelectorAll("p")).find((p) =>
+                    p.innerText.trim().startsWith("Qty Available:")
+                );
+                const qtyText = qtyEl ? qtyEl.innerText.replace("Qty Available:", "").trim() : null;
+                const quantity = qtyText !== null ? parseInt(qtyText, 10) : null;
 
-                matches.push({ name, sku, stock_text: stockText, quantity: qty, in_stock: inStock });
+                // ── MSRP ───────────────────────────────────────────────────────
+                const msrpEl = Array.from(item.querySelectorAll("p")).find((p) =>
+                    p.innerText.trim().startsWith("MSRP:")
+                );
+                const msrp = msrpEl ? msrpEl.innerText.replace("MSRP:", "").trim() : "";
+
+                // ── Price (distributor price) ──────────────────────────────────
+                const priceWrapperEl = item.querySelector(".flex.flex-col.relative + * span.font-bold, span.font-bold");
+                // More reliable: find the Price label and grab the adjacent span
+                const priceLabelEl = Array.from(item.querySelectorAll("p")).find((p) =>
+                    p.innerText.trim().startsWith("Price:")
+                );
+                let price = "";
+                if (priceLabelEl) {
+                    // Price is in a sibling span inside the same wrapper div
+                    const priceContainer = priceLabelEl.closest("div");
+                    const priceSpan = priceContainer ? priceContainer.querySelector("span.font-bold") : null;
+                    price = priceSpan ? priceSpan.innerText.trim() : "";
+                }
+
+                // ── Preorder info ──────────────────────────────────────────────
+                // Present when item has a preorder-countdown-grid block
+                const preorderGrid = item.querySelector(".preorder-countdown-grid");
+                let isPreorder = false;
+                let orderDueText = "";
+                let releaseDate = "";
+                let orderByDate = "";
+
+                if (preorderGrid) {
+                    isPreorder = true;
+
+                    // "Order Due: 76 Days"
+                    const dueDaysEl = preorderGrid.querySelector(".preorder-countdown-list-text-green span");
+                    orderDueText = dueDaysEl ? dueDaysEl.innerText.trim() : "";
+
+                    // Release date and Order By date are in .text-date spans
+                    const datePairs = preorderGrid.querySelectorAll(".text-date");
+                    datePairs.forEach((el) => {
+                        const text = el.innerText.trim();
+                        if (text.startsWith("Release")) {
+                            const bold = el.querySelector("span.font-bold");
+                            releaseDate = bold ? bold.innerText.trim() : text.replace(/Release\s*(Date)?:?/i, "").trim();
+                        } else if (text.startsWith("Order By")) {
+                            const bold = el.querySelector("span.font-bold");
+                            orderByDate = bold ? bold.innerText.trim() : text.replace(/Order By:?/i, "").trim();
+                        }
+                    });
+                }
+
+                // ── Action button type (Preorder vs Add to Cart) ───────────────
+                const buttonEl = item.querySelector("button[type='submit']");
+                const buttonLabel = buttonEl ? buttonEl.innerText.trim() : "";
+
+                // ── Product URL ────────────────────────────────────────────────
+                const linkEl = item.querySelector("h3 a");
+                const href = linkEl ? linkEl.getAttribute("href") : "";
+                const url = href
+                    ? `https://www.acdd.com${href.startsWith("/") ? href : "/" + href}`
+                    : "";
+
+                matches.push({
+                    name,
+                    sku,
+                    quantity,
+                    msrp,
+                    price,
+                    is_preorder: isPreorder,
+                    order_due: orderDueText,
+                    release_date: releaseDate,
+                    order_by_date: orderByDate,
+                    button_label: buttonLabel,
+                    url,
+                });
             });
 
             if (matches.length === 0) {
                 return { found: false, status: "Not found", quantity: 0, matches: [] };
             }
 
+            // ── Build summary status for the best/first match ──────────────────
             const best = matches[0];
-            const statusMsg = best.in_stock
-                ? `Available, ${best.quantity} in stock`
-                : `Available, but 0 stock`;
+            let statusMsg = "";
+
+            if (best.is_preorder) {
+                statusMsg = `Preorder — Qty: ${best.quantity ?? "unknown"}`;
+                if (best.order_due) statusMsg += `, ${best.order_due}`;
+                if (best.release_date) statusMsg += `, Release: ${best.release_date}`;
+                if (best.order_by_date) statusMsg += `, Order By: ${best.order_by_date}`;
+            } else if (best.quantity !== null) {
+                statusMsg = best.quantity > 0
+                    ? `Available, ${best.quantity} in stock`
+                    : `Available, but 0 stock`;
+            } else {
+                statusMsg = `Available — ${matches.length} product${matches.length > 1 ? "s" : ""} found`;
+            }
 
             return {
                 found: true,
                 status: statusMsg,
                 quantity: best.quantity,
-                in_stock: best.in_stock,
+                in_stock: best.quantity !== null ? best.quantity > 0 : null,
+                is_preorder: best.is_preorder,
                 matches: matches.slice(0, 5),
             };
-        }, product_name);
+        });
 
         console.log(`[ACD] Result for "${product_name}":`, result.status);
         return res.json({
@@ -130,6 +208,7 @@ app.post("/search/acd", async (req, res) => {
             product_name,
             ...result,
         });
+
     } catch (err) {
         console.error("[ACD] Error:", err.message);
         return res.status(500).json({ error: err.message });
