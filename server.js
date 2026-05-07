@@ -146,8 +146,12 @@ app.post("/search/acd", async (req, res) => {
                 }
 
                 // ── Action button type (Preorder vs Add to Cart) ───────────────
+                // Also use button label as fallback: some preorders have no countdown grid yet
                 const buttonEl = item.querySelector("button[type='submit']");
                 const buttonLabel = buttonEl ? buttonEl.innerText.trim() : "";
+                if (!isPreorder && buttonLabel.toLowerCase() === "preorder") {
+                    isPreorder = true;
+                }
 
                 // ── Product URL ────────────────────────────────────────────────
                 const linkEl = item.querySelector("h3 a");
@@ -175,8 +179,11 @@ app.post("/search/acd", async (req, res) => {
                 return { found: false, status: "Not found", quantity: 0, matches: [] };
             }
 
-            // ── Build summary status for the best/first match ──────────────────
-            const best = matches[0];
+            // ── Build summary status ───────────────────────────────────────────
+            // Prefer the first in-stock non-preorder result as "best".
+            // Fall back to first preorder if nothing is in stock.
+            const inStockMatch = matches.find((m) => !m.is_preorder && m.quantity > 0);
+            const best = inStockMatch || matches[0];
             let statusMsg = "";
 
             if (best.is_preorder) {
@@ -184,10 +191,10 @@ app.post("/search/acd", async (req, res) => {
                 if (best.order_due) statusMsg += `, ${best.order_due}`;
                 if (best.release_date) statusMsg += `, Release: ${best.release_date}`;
                 if (best.order_by_date) statusMsg += `, Order By: ${best.order_by_date}`;
-            } else if (best.quantity !== null) {
-                statusMsg = best.quantity > 0
-                    ? `Available, ${best.quantity} in stock`
-                    : `Available, but 0 stock`;
+            } else if (best.quantity !== null && best.quantity > 0) {
+                statusMsg = `Available, ${best.quantity} in stock`;
+            } else if (best.quantity === 0) {
+                statusMsg = `Available, but 0 stock`;
             } else {
                 statusMsg = `Available — ${matches.length} product${matches.length > 1 ? "s" : ""} found`;
             }
