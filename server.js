@@ -180,24 +180,37 @@ app.post("/search/acd", async (req, res) => {
             }
 
             // ── Build summary status ───────────────────────────────────────────
-            // Prefer the first in-stock non-preorder result as "best".
-            // Fall back to first preorder if nothing is in stock.
+            // Always list all matched products (up to 9) with qty and preorder flag.
+            // Format: "Name (qty) // Name (qty) [Preorder] // ..."
+            // For a single result, prepend a clear availability label.
+            const productList = matches
+                .slice(0, 9)
+                .map((m) => {
+                    const qty = m.quantity !== null ? ` (${m.quantity})` : "";
+                    const tag = m.is_preorder ? " [Preorder]" : "";
+                    return `${m.name}${qty}${tag}`;
+                })
+                .join(" // ");
+
+            let statusMsg = "";
+            if (matches.length === 1) {
+                const m = matches[0];
+                if (m.is_preorder) {
+                    statusMsg = `Preorder — ${m.name}`;
+                    if (m.order_due) statusMsg += `, ${m.order_due}`;
+                    if (m.release_date) statusMsg += `, Release: ${m.release_date}`;
+                    if (m.order_by_date) statusMsg += `, Order By: ${m.order_by_date}`;
+                } else if (m.quantity > 0) {
+                    statusMsg = `Available, ${m.quantity} in stock — ${m.name}`;
+                } else {
+                    statusMsg = `Available, but 0 stock — ${m.name}`;
+                }
+            } else {
+                statusMsg = `${matches.length} products found — ${productList}`;
+            }
+
             const inStockMatch = matches.find((m) => !m.is_preorder && m.quantity > 0);
             const best = inStockMatch || matches[0];
-            let statusMsg = "";
-
-            if (best.is_preorder) {
-                statusMsg = `Preorder — Qty: ${best.quantity ?? "unknown"}`;
-                if (best.order_due) statusMsg += `, ${best.order_due}`;
-                if (best.release_date) statusMsg += `, Release: ${best.release_date}`;
-                if (best.order_by_date) statusMsg += `, Order By: ${best.order_by_date}`;
-            } else if (best.quantity !== null && best.quantity > 0) {
-                statusMsg = `Available, ${best.quantity} in stock`;
-            } else if (best.quantity === 0) {
-                statusMsg = `Available, but 0 stock`;
-            } else {
-                statusMsg = `Available — ${matches.length} product${matches.length > 1 ? "s" : ""} found`;
-            }
 
             return {
                 found: true,
@@ -205,7 +218,7 @@ app.post("/search/acd", async (req, res) => {
                 quantity: best.quantity,
                 in_stock: best.quantity !== null ? best.quantity > 0 : null,
                 is_preorder: best.is_preorder,
-                matches: matches.slice(0, 5),
+                matches: matches.slice(0, 9),
             };
         });
 
