@@ -247,20 +247,19 @@ app.post("/search/asmodee", async (req, res) => {
         console.log(`ASMODEE Logging in as ${username}...`);
         await page.goto("https://shop.asmodee.com/profile/login", { waitUntil: "networkidle" });
 
-        // Dismiss cookie consent modal if present
+        // Dismiss cookie consent modal
         try {
-            await page.waitForSelector('#didomi-notice-agree-button', { timeout: 8000 });
+            await page.waitForSelector('#didomi-notice-agree-button', { state: 'visible', timeout: 8000 });
             await page.click('#didomi-notice-agree-button');
-            await page.waitForTimeout(3000);
+            // Wait for the modal to fully disappear before proceeding
+            await page.waitForSelector('#didomi-notice-agree-button', { state: 'hidden', timeout: 8000 });
             console.log("[ASMODEE] Cookie modal dismissed");
         } catch {
-            console.log("[ASMODEE] No cookie modal found, continuing...");
+            console.log("[ASMODEE] No cookie modal, continuing...");
         }
 
-        await page.fill('input[name="UserName"]', username);
-        await page.fill('input[name="Password"]', password);
-        await page.click('#loginPage > div > div.form-holder > form > div.form-row.row-actions > button');
-        await page.waitForNavigation({ waitUntil: "networkidle" }).catch(() => { });
+        // Now wait explicitly for the login form to be ready before filling
+        await page.waitForSelector('input[name="UserName"]', { state: 'visible', timeout: 15000 });
 
         // Confirm login succeeded by checking we're no longer on the login page
         const loginFailed = page.url().includes("/login");
