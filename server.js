@@ -247,6 +247,16 @@ app.post("/search/asmodee", async (req, res) => {
         console.log(`ASMODEE Logging in as ${username}...`);
         await page.goto("https://shop.asmodee.com/profile/login", { waitUntil: "networkidle" });
 
+        // Dismiss cookie consent modal if present
+        try {
+            await page.waitForSelector('#didomi-notice-agree-button', { timeout: 8000 });
+            await page.click('#didomi-notice-agree-button');
+            await page.waitForTimeout(1000);
+            console.log("[ASMODEE] Cookie modal dismissed");
+        } catch {
+            console.log("[ASMODEE] No cookie modal found, continuing...");
+        }
+
         await page.fill('input[name="UserName"]', username);
         await page.fill('input[name="Password"]', password);
         await page.click('#loginPage > div > div.form-holder > form > div.form-row.row-actions > button');
