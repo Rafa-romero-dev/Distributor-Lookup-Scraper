@@ -251,7 +251,7 @@ app.post("/search/asmodee", async (req, res) => {
         try {
             await page.waitForSelector('#didomi-notice-agree-button', { timeout: 8000 });
             await page.click('#didomi-notice-agree-button');
-            await page.waitForTimeout(1000);
+            await page.waitForTimeout(3000);
             console.log("[ASMODEE] Cookie modal dismissed");
         } catch {
             console.log("[ASMODEE] No cookie modal found, continuing...");
