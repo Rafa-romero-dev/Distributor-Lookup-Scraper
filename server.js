@@ -258,6 +258,11 @@ app.post("/search/asmodee", async (req, res) => {
             console.log("[ASMODEE] No cookie modal, continuing...");
         }
 
+        await page.waitForTimeout(2000);
+        console.log("[ASMODEE] URL after cookie dismiss:", page.url());
+        console.log("[ASMODEE] Page title:", await page.title());
+        console.log("[ASMODEE] Page HTML snippet:", (await page.content()).substring(0, 3000));
+
         // Now wait explicitly for the login form to be ready before filling
         await page.waitForSelector('input[name="UserName"]', { state: 'visible', timeout: 15000 });
 
