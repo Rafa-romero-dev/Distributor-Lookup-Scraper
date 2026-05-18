@@ -160,19 +160,7 @@ app.post("/search/acd", async (req, res) => {
                     ? `https://www.acdd.com${href.startsWith("/") ? href : "/" + href}`
                     : "";
 
-                matches.push({
-                    name,
-                    sku,
-                    quantity,
-                    msrp,
-                    price,
-                    is_preorder: isPreorder,
-                    order_due: orderDueText,
-                    release_date: releaseDate,
-                    order_by_date: orderByDate,
-                    button_label: buttonLabel,
-                    url,
-                });
+                matches.push({ name, sku, quantity, price, url, in_stock: inStock, is_preorder: isPreorder });
             });
 
             if (matches.length === 0) {
@@ -231,6 +219,138 @@ app.post("/search/acd", async (req, res) => {
 
     } catch (err) {
         console.error("[ACD] Error:", err.message);
+        return res.status(500).json({ error: err.message });
+    } finally {
+        if (browser) await browser.close();
+    }
+});
+
+// ─── asmodee search ─────────────────────────────────────────────
+app.post("/search/asmodee", async (req, res) => {
+    const { product_name, username, password } = req.body;
+
+    if (!product_name || !username || !password) {
+        return res.status(400).json({ error: "Missing product_name, username, or password" });
+    }
+
+    let browser;
+    try {
+        browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+        const context = await browser.newContext({
+            userAgent:
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        });
+        const page = await context.newPage();
+
+        // ── Step 1: Log in ────────────────────────────────────────────────────
+        console.log(`ASMODEE Logging in as ${username}...`);
+        await page.goto("https://shop.asmodee.com/profile/login", { waitUntil: "networkidle" });
+
+        await page.fill('input[name="UserName"]', username);
+        await page.fill('input[name="Password"]', password);
+        await page.click('#loginPage > div > div.form-holder > form > div.form-row.row-actions > button');
+        await page.waitForNavigation({ waitUntil: "networkidle" }).catch(() => { });
+
+        // Confirm login succeeded by checking we're no longer on the login page
+        const loginFailed = page.url().includes("/login");
+        if (loginFailed) {
+            return res.status(401).json({ error: "Login failed — check credentials" });
+        }
+
+        // ── Step 2: Search ────────────────────────────────────────────────────
+        console.log(`ASMODEE Searching for: ${product_name}`);
+        await page.goto(
+            `https://shop.asmodee.com/search?q=${encodeURIComponent(product_name)}`,
+            { waitUntil: "networkidle" }
+        );
+
+        // ── Step 3: Parse results ─────────────────────────────────────────────
+        const result = await page.evaluate(() => {
+            const items = document.querySelectorAll("div.l-products-item");
+
+            if (!items || items.length === 0) {
+                const bodyText = document.body.innerText.toLowerCase();
+                if (bodyText.includes("no results") || bodyText.includes("no products found")) {
+                    return { found: false, status: "Not found", quantity: 0, matches: [] };
+                }
+                return { found: false, status: "Not found", quantity: 0, matches: [] };
+            }
+
+            const matches = [];
+            items.forEach((item) => {
+                const nameEl = item.querySelector('a.product-title span[itemprop="name"]');
+                if (!nameEl) return;
+
+                const name = nameEl.innerText.trim();
+
+                const skuEl = item.querySelector("span.product-id-value");
+                const sku = skuEl ? skuEl.innerText.replace(/sku:?/i, "").trim() : "";
+
+                const stockEl = item.querySelector("span.lbl-stock");
+                const stockText = stockEl ? stockEl.innerText.trim() : "";
+                const inStock = stockEl ? stockEl.classList.contains("in-stock") : false;
+                const isPreorder = stockText.toLowerCase().includes("pre order") ||
+                    stockText.toLowerCase().includes("back order");
+                const quantity = inStock ? 1 : 0; // No exact number exposed, use 1 as "in stock" flag
+
+                const priceEl = item.querySelector("span.lbl-price");
+                const price = priceEl ? priceEl.innerText.trim() : "";
+
+                const href = item.querySelector("a.product-title")?.getAttribute("href")?.split("?")[0] || "";
+                const url = href
+                    ? `https://shop.asmodee.com${href.startsWith("/") ? href : "/" + href}`
+                    : "";
+
+                matches.push({ name, sku, quantity, price, url });
+            });
+
+            if (matches.length === 0) {
+                return { found: false, status: "Not found", quantity: 0, matches: [] };
+            }
+
+            const productList = matches
+                .slice(0, 9)
+                .map((m) => {
+                    const qty = m.quantity !== null ? ` (${m.quantity})` : "";
+                    return `${m.name}${qty}`;
+                })
+                .join(" // ");
+
+            let statusMsg = "";
+            if (matches.length === 1) {
+                const m = matches[0];
+                if (m.is_preorder) {
+                    statusMsg = `Back Order / Pre Order — ${m.name}`;
+                } else if (m.in_stock) {
+                    statusMsg = `In Stock — ${m.name}`;
+                } else {
+                    statusMsg = `Out of Stock — ${m.name}`;
+                }
+            } else {
+                statusMsg = `${matches.length} products found — ${productList}`;
+            }
+
+            const best = matches.find((m) => m.quantity > 0) || matches[0];
+
+            return {
+                found: true,
+                status: statusMsg,
+                quantity: best.quantity,
+                in_stock: best.quantity !== null ? best.quantity > 0 : null,
+                matches: matches.slice(0, 9),
+            };
+        });
+
+        console.log(`ASMODEE Result for "${product_name}":`, result.status);
+        return res.json({
+            distributor: "ASMODEE",
+            product_name,
+            ...result,
+        });
+
+    } catch (err) {
+        console.error("ASMODEE Error:", err.message);
         return res.status(500).json({ error: err.message });
     } finally {
         if (browser) await browser.close();
