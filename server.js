@@ -160,7 +160,19 @@ app.post("/search/acd", async (req, res) => {
                     ? `https://www.acdd.com${href.startsWith("/") ? href : "/" + href}`
                     : "";
 
-                matches.push({ name, sku, quantity, price, url, in_stock: inStock, is_preorder: isPreorder });
+                matches.push({
+                    name,
+                    sku,
+                    quantity,
+                    price,
+                    msrp,
+                    url,
+                    in_stock: quantity !== null ? quantity > 0 : null,
+                    is_preorder: isPreorder,
+                    order_due: orderDueText,
+                    release_date: releaseDate,
+                    order_by_date: orderByDate,
+                });
             });
 
             if (matches.length === 0) {
@@ -316,7 +328,7 @@ app.post("/search/asmodee", async (req, res) => {
                     ? `https://shop.asmodee.com${href.startsWith("/") ? href : "/" + href}`
                     : "";
 
-                matches.push({ name, sku, quantity, price, url });
+                matches.push({ name, sku, quantity, price, url, in_stock: inStock, is_preorder: isPreorder });
             });
 
             if (matches.length === 0) {
