@@ -505,6 +505,16 @@ app.post("/search/universal", async (req, res) => {
                 });
             });
 
+            // Deduplicate by name — Universal sometimes returns the same product twice
+            const seen = new Set();
+            const uniqueMatches = matches.filter((m) => {
+                if (seen.has(m.name)) return false;
+                seen.add(m.name);
+                return true;
+            });
+            matches.length = 0;
+            uniqueMatches.forEach((m) => matches.push(m));
+
             if (matches.length === 0) {
                 return { found: false, status: "Not found", quantity: 0, matches: [] };
             }
