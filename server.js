@@ -383,4 +383,179 @@ app.post("/search/asmodee", async (req, res) => {
     }
 });
 
+// ─── Universal Distribution (Alliance) search ─────────────────────────────────
+app.post("/search/universal", async (req, res) => {
+    const { product_name, username, password } = req.body;
+
+    if (!product_name || !username || !password) {
+        return res.status(400).json({ error: "Missing product_name, username, or password" });
+    }
+
+    let browser;
+    try {
+        browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+        const context = await browser.newContext({
+            userAgent:
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        });
+        const page = await context.newPage();
+
+        // ── Step 1: Log in ────────────────────────────────────────────────────
+        console.log(`[UNIVERSAL] Logging in as ${username}...`);
+        await page.goto("https://us.universaldist.com/login", { waitUntil: "networkidle" });
+
+        // Universal is an Angular SPA — wait for the login form to be rendered
+        await page.waitForSelector('input[type="email"], input[name="email"], input[placeholder*="email" i]', { timeout: 15000 });
+        await page.fill('input[placeholder="Email Address"]', username);
+
+        await page.waitForSelector('input[type="password"]', { timeout: 10000 });
+        await page.fill('input[placeholder="password"]', password);
+
+        await page.click('button:has-text("Login")');
+        await page.waitForNavigation({ waitUntil: "networkidle" }).catch(() => { });
+
+        // Verify login — if still on /login, credentials failed
+        if (page.url().includes("/login")) {
+            return res.status(401).json({ error: "Universal login failed — check credentials" });
+        }
+        console.log(`[UNIVERSAL] Logged in. Current URL: ${page.url()}`);
+
+        // ── Step 2: Search ────────────────────────────────────────────────────
+        // Universal uses keyword + term params. "in-stock" shows all results including 0-stock.
+        // Remove the term filter so we get everything including preorders.
+        console.log(`[UNIVERSAL] Searching for: ${product_name}`);
+        await page.goto(
+            `https://us.universaldist.com/search-list?keyword=${encodeURIComponent(product_name)}`,
+            { waitUntil: "networkidle" }
+        );
+
+        // Angular renders results asynchronously — wait for product rows to appear
+        try {
+            await page.waitForSelector("tr.ng-star-inserted", { timeout: 15000 });
+        } catch {
+            // No results rendered — check for empty state message
+            const bodyText = await page.evaluate(() => document.body.innerText.toLowerCase());
+            if (bodyText.includes("no result") || bodyText.includes("no product") || bodyText.includes("0 result")) {
+                return res.json({ distributor: "Universal Distribution", product_name, found: false, status: "Not found", quantity: 0, matches: [] });
+            }
+            return res.json({ distributor: "Universal Distribution", product_name, found: false, status: "Not found", quantity: 0, matches: [] });
+        }
+
+        // ── Step 3: Parse results ─────────────────────────────────────────────
+        const result = await page.evaluate(() => {
+            const rows = document.querySelectorAll("tr.ng-star-inserted");
+
+            if (!rows || rows.length === 0) {
+                return { found: false, status: "Not found", quantity: 0, matches: [] };
+            }
+
+            const matches = [];
+
+            rows.forEach((row) => {
+                // ── Name ───────────────────────────────────────────────────────
+                // Format: "MONOPOLY POKEMON (6)" — strip the trailing case qty in parens
+                const nameEl = row.querySelector(".item-title");
+                if (!nameEl) return;
+                const rawName = nameEl.innerText.trim();
+                const name = rawName.replace(/\s*\(\d+\)\s*$/, "").trim(); // strip "(6)" suffix
+                const caseQty = rawName.match(/\((\d+)\)\s*$/)?.[1] || null;
+
+                // ── Price ──────────────────────────────────────────────────────
+                // First .ng-star-inserted div inside .price contains the price
+                const priceEl = row.querySelector(".price .ng-star-inserted");
+                const price = priceEl ? priceEl.innerText.trim() : "";
+
+                // ── Discount ───────────────────────────────────────────────────
+                const discountEl = row.querySelector(".text-danger.ng-star-inserted");
+                const discount = discountEl ? discountEl.innerText.trim() : "";
+
+                // ── Warehouse availability ─────────────────────────────────────
+                // Each warehouse is a span.warehouse — isAvailable class = in stock there
+                const warehouseEls = row.querySelectorAll("span.warehouse");
+                const warehouses = [];
+                let availableCount = 0;
+
+                warehouseEls.forEach((w) => {
+                    const code = w.innerText.trim();
+                    const available = w.classList.contains("isAvailable");
+                    if (code) {
+                        warehouses.push({ code, available });
+                        if (available) availableCount++;
+                    }
+                });
+
+                const inStock = availableCount > 0;
+
+                // Build a readable warehouse string: "RDL ✓ / FWA ✓ / AUS ✓ / VIS ✗"
+                const warehouseStr = warehouses
+                    .map((w) => `${w.code}${w.available ? " ✓" : " ✗"}`)
+                    .join(" / ");
+
+                matches.push({
+                    name,
+                    case_qty: caseQty,
+                    price,
+                    discount,
+                    in_stock: inStock,
+                    available_warehouses: availableCount,
+                    total_warehouses: warehouses.length,
+                    warehouses: warehouseStr,
+                    is_preorder: false, // Universal shows live stock only
+                });
+            });
+
+            if (matches.length === 0) {
+                return { found: false, status: "Not found", quantity: 0, matches: [] };
+            }
+
+            // ── Build status string ────────────────────────────────────────────
+            // Universal doesn't expose exact qty — use warehouse availability instead
+            const productList = matches
+                .slice(0, 9)
+                .map((m) => {
+                    const stock = m.in_stock
+                        ? `${m.available_warehouses}/${m.total_warehouses} warehouses`
+                        : "No stock";
+                    return `${m.name} (${stock})`;
+                })
+                .join(" // ");
+
+            let statusMsg = "";
+            if (matches.length === 1) {
+                const m = matches[0];
+                statusMsg = m.in_stock
+                    ? `Available — ${m.name}, ${m.available_warehouses}/${m.total_warehouses} warehouses [${m.warehouses}]`
+                    : `Available, but no stock — ${m.name}`;
+            } else {
+                statusMsg = `${matches.length} products found — ${productList}`;
+            }
+
+            const best = matches.find((m) => m.in_stock) || matches[0];
+
+            return {
+                found: true,
+                status: statusMsg,
+                quantity: best.available_warehouses, // warehouses as proxy for qty
+                in_stock: best.in_stock,
+                is_preorder: false,
+                matches: matches.slice(0, 9),
+            };
+        });
+
+        console.log(`[UNIVERSAL] Result for "${product_name}":`, result.status);
+        return res.json({
+            distributor: "Universal Distribution",
+            product_name,
+            ...result,
+        });
+
+    } catch (err) {
+        console.error("[UNIVERSAL] Error:", err.message);
+        return res.status(500).json({ error: err.message });
+    } finally {
+        if (browser) await browser.close();
+    }
+});
+
 app.listen(PORT, () => console.log(`Vendor lookup scraper running on port ${PORT}`));
