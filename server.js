@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const { chromium } = require("playwright");
 
@@ -891,12 +893,14 @@ app.post("/search/southernhobby", async (req, res) => {
 
         // ── Step 1: Log in ────────────────────────────────────────────────────
         console.log(`[SOUTHERNHOBBY] Logging in as ${username}...`);
-        await page.goto("https://www.southernhobby.com/login.php", { waitUntil: "networkidle" });
+        await page.goto("https://www.southernhobby.com/login.php", { waitUntil: "domcontentloaded" });
+        await page.waitForSelector('input[name="email_address"]', { timeout: 15000 });
 
         await page.fill('input[name="email_address"]', username);
         await page.fill('input[name="password"]', password);
-        await page.click('input[type="submit"], button[type="submit"], .login-btn');
-        await page.waitForNavigation({ waitUntil: "networkidle" }).catch(() => { });
+        await page.click('input[name="login"]');
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => { });
+        await page.waitForTimeout(2000);
 
         const loginFailed = (await page.$('.error, .alert-danger, [class*="error"]')) !== null;
         if (loginFailed) {
@@ -907,8 +911,9 @@ app.post("/search/southernhobby", async (req, res) => {
         console.log(`[SOUTHERNHOBBY] Searching for: ${product_name}`);
         await page.goto(
             `https://www.southernhobby.com/advanced_search_result.php?search_in_description=1&q=${encodeURIComponent(product_name)}`,
-            { waitUntil: "networkidle" }
+            { waitUntil: "domcontentloaded" }
         );
+        await page.waitForTimeout(2000);
 
         // ── Step 3: Parse results ─────────────────────────────────────────────
         const result = await page.evaluate(() => {
