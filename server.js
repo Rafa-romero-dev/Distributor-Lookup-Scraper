@@ -36,10 +36,13 @@ app.post("/search/acd", async (req, res) => {
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         });
         const page = await context.newPage();
+        page.setDefaultTimeout(60000);
+        page.setDefaultNavigationTimeout(60000);
 
         // ── Step 1: Log in ────────────────────────────────────────────────────────
         console.log(`[ACD] Logging in as ${acd_username}...`);
-        await page.goto("https://www.acdd.com/login", { waitUntil: "networkidle" });
+        await page.goto("https://www.acdd.com/login", { waitUntil: "domcontentloaded" });
+        await page.waitForSelector('input[name="email"], input[type="email"], #email', { timeout: 15000 });
 
         await page.fill('input[name="email"], input[type="email"], #email', acd_username);
         await page.fill('input[name="password"], input[type="password"], #password', acd_password);
@@ -57,8 +60,9 @@ app.post("/search/acd", async (req, res) => {
         console.log(`[ACD] Searching for: ${product_name}`);
         await page.goto(
             `https://www.acdd.com/search?term=${encodeURIComponent(product_name)}`,
-            { waitUntil: "networkidle" }
+            { waitUntil: "domcontentloaded" }
         );
+        await page.waitForSelector("div.group", { timeout: 15000 }).catch(() => { });
 
         // ── Step 3: Parse results ─────────────────────────────────────────────────
         const result = await page.evaluate(() => {
@@ -256,6 +260,8 @@ app.post("/search/asmodee", async (req, res) => {
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         });
         const page = await context.newPage();
+        page.setDefaultTimeout(60000);
+        page.setDefaultNavigationTimeout(60000);
 
         // ── Step 1: Log in ────────────────────────────────────────────────────
         console.log(`ASMODEE Logging in as ${username}...`);
@@ -402,6 +408,8 @@ app.post("/search/universal", async (req, res) => {
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         });
         const page = await context.newPage();
+        page.setDefaultTimeout(60000);
+        page.setDefaultNavigationTimeout(60000);
 
         // ── Step 1: Log in ────────────────────────────────────────────────────
         console.log(`[UNIVERSAL] Logging in as ${username}...`);
@@ -590,13 +598,16 @@ app.post("/search/stonemaier", async (req, res) => {
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         });
         const page = await context.newPage();
+        page.setDefaultTimeout(60000);
+        page.setDefaultNavigationTimeout(60000);
 
         // ── Search (no login step at all) ───────────────────────────────────────
         console.log(`[STONEMAIER] Searching for: ${product_name}`);
         await page.goto(
             `https://store.stonemaiergames.com/search?type=product&options[prefix]=last&q=${encodeURIComponent(product_name)}`,
-            { waitUntil: "networkidle" }
+            { waitUntil: "domcontentloaded" }
         );
+        await page.waitForSelector('script[class^="ProductJson-"]', { timeout: 15000 }).catch(() => { });
 
         // ── Parse results from embedded JSON ────────────────────────────────────
         const result = await page.evaluate(() => {
@@ -726,6 +737,8 @@ app.post("/search/phd", async (req, res) => {
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         });
         const page = await context.newPage();
+        page.setDefaultTimeout(60000);
+        page.setDefaultNavigationTimeout(60000);
 
         // ── Step 1: Log in ────────────────────────────────────────────────────
         console.log(`[PHD] Logging in as ${username}...`);
@@ -890,6 +903,8 @@ app.post("/search/southernhobby", async (req, res) => {
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         });
         const page = await context.newPage();
+        page.setDefaultTimeout(60000);
+        page.setDefaultNavigationTimeout(60000);
 
         // ── Step 1: Log in ────────────────────────────────────────────────────
         console.log(`[SOUTHERNHOBBY] Logging in as ${username}...`);
